@@ -8,6 +8,7 @@
 import React, {useEffect} from 'react';
 import retry from 'async-retry';
 import {
+  Button,
   PermissionsAndroid,
   Platform,
   SafeAreaView,
@@ -120,7 +121,11 @@ function App(): React.JSX.Element {
     );
   };
 
-  const doBluetoothThings = async (device: Device): Promise<void> => {
+  const doBluetoothThings = async (): Promise<void> => {
+    const device = state.device;
+    if (!device) {
+      return;
+    }
     var disconnectSub: Subscription | undefined;
     var connected = false;
     try {
@@ -189,26 +194,8 @@ function App(): React.JSX.Element {
             device.localName.startsWith('Taggr')
           ) {
             console.log('Found device:', device.localName);
-            // Do something with the device
-            setState(state => ({...state, device}));
             if (state.device?.id !== device.id) {
-              (async () => {
-                try {
-                  await retry(
-                    async () => {
-                      await doBluetoothThings(device);
-                    },
-                    {
-                      retries: 3,
-                      onRetry: (error: any) => {
-                        console.warn(`Try resulted in ${error}. Retrying...`);
-                      },
-                    },
-                  );
-                } catch (err) {
-                  console.error(`Error doing bluetooth things: ${err}`);
-                }
-              })();
+              setState(state => ({...state, device}));
             }
           }
         });
@@ -223,6 +210,27 @@ function App(): React.JSX.Element {
       manager.stopDeviceScan();
     };
   }, []);
+
+  const doTest = () => {
+    (async () => {
+      try {
+        await retry(
+          async () => {
+            await doBluetoothThings();
+          },
+          {
+            retries: 3,
+            onRetry: (error: any) => {
+              console.warn(`Try resulted in ${error}. Retrying...`);
+            },
+          },
+        );
+      } catch (err) {
+        console.error(`Error doing bluetooth things: ${err}`);
+      }
+    })();
+  };
+
   return (
     <SafeAreaView style={backgroundStyle}>
       <StatusBar
@@ -236,12 +244,16 @@ function App(): React.JSX.Element {
           style={{
             backgroundColor: isDarkMode ? Colors.black : Colors.white,
           }}>
-          <Text>
-            {state.device
-              ? `Local Name: ${state.device.localName}`
-              : 'searching...'}
-          </Text>
-          <Text>{state.device ? `RSSI: ${state.rssi}` : ''}</Text>
+          {state.device && (
+            <Button
+              title="Do Something with Bluetooth"
+              onPress={() => (async () => doTest())()}
+            />
+          )}
+          <>
+            <Text>Local Name: {state.device?.localName}</Text>
+            <Text>RSSI: {state.rssi}</Text>
+          </>
           <Text>{state.message}</Text>
         </View>
       </ScrollView>
