@@ -10,8 +10,13 @@
     "test": "jest"
   },
   "dependencies": {
+    "buffer": "*",
+    "fastestsmallesttextencoderdecoder": "*",
     "react": "18.2.0",
-    "react-native": "0.74.3"
+    "react-native": "0.74.3",
+    "react-native-ble-plx": "^3.2.0",
+    "text-encoding": "^0.7.0",
+    "text-encoding-polyfill": "^0.6.7"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
