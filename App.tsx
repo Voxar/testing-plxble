@@ -164,8 +164,6 @@ function App(): React.JSX.Element {
       await manager.cancelDeviceConnection(device.id);
       connected = false;
       log('Done');
-    } catch (error) {
-      console.error('Error connecting to device:', error);
     } finally {
       disconnectSub?.remove();
       if (connected) {
@@ -195,7 +193,21 @@ function App(): React.JSX.Element {
             setState(state => ({...state, device}));
             if (state.device?.id !== device.id) {
               (async () => {
-                await doBluetoothThings(device);
+                try {
+                  await retry(
+                    async () => {
+                      await doBluetoothThings(device);
+                    },
+                    {
+                      retries: 3,
+                      onRetry: (error: any) => {
+                        console.warn(`Try resulted in ${error}. Retrying...`);
+                      },
+                    },
+                  );
+                } catch (err) {
+                  console.error(`Error doing bluetooth things: ${err}`);
+                }
               })();
             }
           }
