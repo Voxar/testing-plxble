@@ -6,6 +6,7 @@
  */
 
 import React, {useEffect} from 'react';
+import retry from 'async-retry';
 import {
   PermissionsAndroid,
   Platform,
@@ -19,7 +20,7 @@ import {
 } from 'react-native';
 
 import {Colors} from 'react-native/Libraries/NewAppScreen';
-import {BleManager, Device} from 'react-native-ble-plx';
+import {BleManager, Device, Subscription} from 'react-native-ble-plx';
 import {Buffer} from 'buffer';
 
 export const manager = new BleManager();
@@ -80,66 +81,98 @@ function App(): React.JSX.Element {
       }
     }
 
-    this.showErrorToast('Permission have not been granted');
+    // this.showErrorToast('Permission have not been granted');
 
     return false;
   };
 
-  const doBluetoothThings = async (device: Device): Promise<void> => {
-    setState(state => ({...state, message: 'Connecting...'}));
-    await device.connect({
-      autoConnect: true,
-      requestMTU: 512,
-    });
-    setState(state => ({...state, message: 'Discovering services...'}));
-    await device.discoverAllServicesAndCharacteristics();
-    setState(state => ({...state, message: 'Reading RSSI...'}));
-    await device.readRSSI();
-    var rssi = device.rssi || 0;
-    setState(state => ({...state, rssi}));
-    setState(state => ({...state, message: 'Reading firmware version...'}));
+  const log = (text: string) => {
+    setState(state => ({...state, message: text}));
+    console.log(text);
+  };
 
-    {
-      const service = 'aa000000-2dd5-4887-8a05-d6655fdc7da9';
-      const characteristic = 'aa000099-2dd5-4887-8a05-d66556278545';
-
-      const char = await device.readCharacteristicForService(
-        service,
-        characteristic,
-      );
-      if (char.value) {
-        const data = Uint8Array.from(Buffer.from(char.value, 'base64'));
-        const firmwareVersion = new TextDecoder().decode(data);
-        console.log(firmwareVersion);
-      } else {
-        console.log('No firmware version found');
-      }
+  const read = async (
+    device: Device,
+    service: string,
+    characteristic: string,
+  ): Promise<string> => {
+    const char = await device.readCharacteristicForService(
+      service,
+      characteristic,
+    );
+    if (char.value) {
+      const data = Uint8Array.from(Buffer.from(char.value, 'base64'));
+      return new TextDecoder().decode(data);
     }
-    // await new Promise(resolve => setTimeout(resolve, 2000));
-    {
-      const service = '29a3f8fa-51aa-49a6-9b6b-d936795326ec';
-      const characteristic = '5002';
+    throw new Error('No data found');
+  };
+
+  const write = async (
+    device: Device,
+    service: string,
+    characteristic: string,
+    data: Uint8Array,
+  ): Promise<void> => {
+    await device.writeCharacteristicWithResponseForService(
+      service,
+      characteristic,
+      Buffer.from(data).toString('base64'),
+    );
+  };
+
+  const doBluetoothThings = async (device: Device): Promise<void> => {
+    var disconnectSub: Subscription | undefined;
+    var connected = false;
+    try {
+      disconnectSub = device.onDisconnected(() => {
+        log(`${device.localName} disconnected`);
+      });
+      log('Connecting...');
+      await device.connect({
+        requestMTU: 512,
+      });
+      connected = true;
+      log('Discovering services...');
+      await device.discoverAllServicesAndCharacteristics();
+
+      log('Reading RSSI...');
+      await device.readRSSI();
+      var rssi = device.rssi || 0;
+      setState(state => ({...state, rssi}));
+      log(`RSSI: ${rssi}`);
+
+      log('Reading firmware version...');
+      const pcbName = await read(
+        device,
+        'aa000000-2dd5-4887-8a05-d6655fdc7da9',
+        'aa000099-2dd5-4887-8a05-d66556278545',
+      );
+      log(`PCB Name: ${pcbName}`);
+
+      log('Writing data...');
       const payload = Buffer.from('0004D2000A02010203', 'base64');
       const payloadWithLen = new Uint8Array([payload.length, ...payload]);
-      const portData = Buffer.from('14', 'base64');
+      const service = '29a3f8fa-51aa-49a6-9b6b-d936795326ec';
+      await write(device, service, '5002', payloadWithLen);
+      await write(device, service, '5003', Buffer.from('14', 'base64'));
 
-      for (let i = 0; i < 10; i++) {
-        console.log(`write ${i + 1}`);
-        await device.writeCharacteristicWithResponseForService(
-          service,
-          characteristic,
-          Buffer.from(payloadWithLen).toString('base64'),
-        );
+      log('Writing data again...');
+      await write(device, service, '5002', payloadWithLen);
+      await write(device, service, '5003', Buffer.from('14', 'base64'));
 
-        await device.writeCharacteristicWithResponseForService(
-          service,
-          '5003',
-          Buffer.from(portData).toString('base64'),
-        );
+      log('Disconnecting...');
+      await manager.cancelDeviceConnection(device.id);
+      connected = false;
+      log('Done');
+    } catch (error) {
+      console.error('Error connecting to device:', error);
+    } finally {
+      disconnectSub?.remove();
+      if (connected) {
+        log('Finally disconnecting');
+        await manager.cancelDeviceConnection(device.id).catch(_ => {});
       }
-      console.log('done');
     }
-    setState(state => ({...state, message: 'Disconnecting...'}));
 
     await device.cancelConnection();
   };
@@ -164,21 +197,7 @@ function App(): React.JSX.Element {
             setState(state => ({...state, device}));
             if (state.device?.id !== device.id) {
               (async () => {
-                const sub = device.onDisconnected(() => {
-                  console.log(device.localName, 'disconnected');
-                });
-                try {
-                  await doBluetoothThings(device).catch(error => {
-                    console.error(error);
-                    device.cancelConnection();
-                  });
-                  // eslint-disable-next-line no-catch-shadow
-                } catch (error) {
-                  console.error('Error doing bluetooth things:', error);
-                } finally {
-                  device.cancelConnection();
-                  sub.remove();
-                }
+                await doBluetoothThings(device);
               })();
             }
           }
