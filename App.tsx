@@ -173,8 +173,6 @@ function App(): React.JSX.Element {
         await manager.cancelDeviceConnection(device.id).catch(_ => {});
       }
     }
-
-    await device.cancelConnection();
   };
 
   useEffect(() => {
